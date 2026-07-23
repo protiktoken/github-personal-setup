@@ -4,6 +4,8 @@ set -u
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script_path="$project_root/windows/setup.ps1"
+cleanup_script_path="$project_root/bootstrap/run.ps1"
+readme_path="$project_root/README.md"
 failures=0
 
 fail() {
@@ -38,6 +40,40 @@ else
         fi
     done
 fi
+
+if [[ ! -f "$cleanup_script_path" ]]; then
+    fail "Windows cleanup runner is missing"
+else
+    cleanup_patterns=(
+        'GITHUB_PERSONAL_SETUP_TEMP_ROOT'
+        'github-personal-setup-'
+        'Remove-Item -LiteralPath $SourceRoot -Recurse -Force'
+        'Warning: Could not remove temporary setup clone'
+        'windows/setup.ps1'
+    )
+
+    for pattern in "${cleanup_patterns[@]}"; do
+        if ! grep -Fq "$pattern" "$cleanup_script_path"; then
+            fail "Windows cleanup runner is missing contract text: $pattern"
+        fi
+    done
+fi
+
+if ! grep -Fq 'Write-Warning "Could not remove temporary setup clone: $setupDir"' "$readme_path"; then
+    fail "Windows run-once documentation does not preserve setup results when fallback cleanup fails"
+fi
+
+windows_wrapper_patterns=(
+    '& $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -Command {'
+    '$setupExitCode = $LASTEXITCODE'
+    'exit $setupExitCode'
+)
+
+for pattern in "${windows_wrapper_patterns[@]}"; do
+    if ! grep -Fq "$pattern" "$readme_path"; then
+        fail "Windows run-once documentation does not preserve the setup exit code: $pattern"
+    fi
+done
 
 if ((failures > 0)); then
     printf '%d Windows contract checks failed\n' "$failures" >&2

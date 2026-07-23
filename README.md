@@ -23,54 +23,126 @@ You need:
 
 When `ssh-keygen` creates a key, it asks for an optional passphrase. Entering a passphrase protects the private key if the file is copied; pressing Enter twice creates the key without one. The passphrase prompt belongs directly to `ssh-keygen`, not these scripts.
 
-## Get The Setup Files
+## Run Once (Recommended)
 
-Clone this repository once:
+The target GitHub repository must already exist. These scripts do not create repositories, commit files, or push code.
+
+The run-once commands clone this project into a uniquely named system temporary directory. The runner and its outer wrapper both attempt to remove that clone after setup succeeds, fails, or is interrupted. If the operating system prevents deletion, a warning identifies the leftover directory without overwriting the setup result. The local repository being configured and the SSH/Git settings created by setup are never deleted.
+
+```mermaid
+flowchart TD
+  A[Run inside target Git repository] --> B[Create unique system temporary directory]
+  B --> C[Clone setup repository]
+  C --> D[Validate token, path, name, and origin]
+  D --> E{Validation passes?}
+  E -->|No| F[Stop without deleting anything]
+  E -->|Yes| G[Run platform setup against target repository]
+  G --> H{Setup outcome}
+  H -->|Success| I[Attempt to delete temporary clone]
+  H -->|Failure| I
+  H -->|Interrupted| I
+  I --> J{Deletion succeeds?}
+  J -->|Yes| K[Return original setup status]
+  J -->|No| L[Warn with leftover directory]
+  L --> K
+```
+
+### macOS Or Linux
+
+Open a terminal in the local repository you want to configure, then run:
+
+```bash
+git rev-parse --show-toplevel >/dev/null && (
+  set -e
+  setup_dir="$(mktemp -d "${TMPDIR:-/tmp}/github-personal-setup.XXXXXX")"
+  cleanup_setup_dir() {
+    exit_code=$?
+    trap - EXIT HUP INT TERM
+    if [[ -d "$setup_dir" ]] && ! rm -rf -- "$setup_dir"; then
+      printf 'Warning: Could not remove temporary setup clone: %s\n' "$setup_dir" >&2
+    fi
+    exit "$exit_code"
+  }
+  trap cleanup_setup_dir EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  git clone --depth 1 https://github.com/protiktoken/github-personal-setup.git "$setup_dir"
+  GITHUB_PERSONAL_SETUP_TEMP_ROOT="$setup_dir" bash "$setup_dir/bootstrap/run.sh"
+)
+```
+
+The runner selects macOS or Linux automatically. Add setup options after `run.sh`, for example `--manual` to register the public SSH key yourself.
+
+The macOS setup uses `pbcopy` and `open` for manual registration and enables Apple's Keychain integration. Linux uses `wl-copy` or `xclip` when available and opens GitHub with `xdg-open`.
+
+### Windows PowerShell
+
+Open PowerShell in the local repository you want to configure, then run:
+
+```powershell
+$powerShellExecutable = (Get-Process -Id $PID).Path
+& $powerShellExecutable -NoProfile -ExecutionPolicy Bypass -Command {
+  git rev-parse --show-toplevel *> $null
+  if ($LASTEXITCODE -ne 0) {
+    [Console]::Error.WriteLine('Run this inside the Git repository you want to configure.')
+    exit 1
+  }
+
+  $setupDir = Join-Path ([System.IO.Path]::GetTempPath()) ("github-personal-setup-{0}" -f [guid]::NewGuid())
+  $setupExitCode = 1
+  try {
+    git clone --depth 1 https://github.com/protiktoken/github-personal-setup.git $setupDir
+    $setupExitCode = $LASTEXITCODE
+
+    if ($setupExitCode -eq 0) {
+      $env:GITHUB_PERSONAL_SETUP_TEMP_ROOT = $setupDir
+      $runnerPowerShell = (Get-Process -Id $PID).Path
+      & $runnerPowerShell -NoProfile -ExecutionPolicy Bypass -File "$setupDir\bootstrap\run.ps1"
+      $setupExitCode = $LASTEXITCODE
+    }
+  }
+  finally {
+    Remove-Item Env:GITHUB_PERSONAL_SETUP_TEMP_ROOT -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $setupDir) {
+      try {
+        Remove-Item -LiteralPath $setupDir -Recurse -Force
+      }
+      catch {
+        Write-Warning "Could not remove temporary setup clone: $setupDir"
+      }
+    }
+  }
+
+  if ($setupExitCode -ne 0) {
+    [Console]::Error.WriteLine("Setup failed with exit code $setupExitCode.")
+  }
+  exit $setupExitCode
+}
+```
+
+Add setup options after `run.ps1`, for example `-Manual`. Windows uses `Set-Clipboard` and opens the GitHub SSH-key page for manual registration.
+
+## Keep A Reusable Copy (Optional)
+
+Contributors or users configuring many repositories can keep one clone instead:
 
 ```bash
 git clone https://github.com/protiktoken/github-personal-setup.git
 ```
 
-The target GitHub repository you configure must already exist. These scripts do not create repositories, commit files, or push code.
-
-## macOS
-
-Open Terminal, move into the repository you want to configure, and run:
+Run the relevant platform script from inside the repository you want to configure:
 
 ```bash
-cd /path/to/your/repository
 bash /path/to/github-personal-setup/macos/setup.sh
-```
-
-The script uses `pbcopy` and `open` for the manual SSH-key fallback. Its SSH entry also enables the macOS Keychain integration supplied by Apple's OpenSSH.
-
-## Linux
-
-Open a terminal, move into the repository you want to configure, and run:
-
-```bash
-cd /path/to/your/repository
 bash /path/to/github-personal-setup/linux/setup.sh
 ```
 
-For the manual fallback, the script uses `wl-copy` or `xclip` when available and opens GitHub with `xdg-open`.
-
-## Windows PowerShell
-
-Open PowerShell, move into the repository you want to configure, and run:
-
 ```powershell
-Set-Location C:\path\to\your\repository
 powershell -ExecutionPolicy Bypass -File C:\path\to\github-personal-setup\windows\setup.ps1
 ```
 
-From PowerShell 7, `pwsh` can be used instead of `powershell`:
-
-```powershell
-pwsh -File C:\path\to\github-personal-setup\windows\setup.ps1
-```
-
-The Windows script uses `Set-Clipboard` and opens the GitHub SSH-key page for the manual fallback.
+Manual clones are never deleted automatically.
 
 ## Questions The Scripts Ask
 

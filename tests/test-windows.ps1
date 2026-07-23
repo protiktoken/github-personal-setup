@@ -8,6 +8,7 @@ $OriginalHome = $env:HOME
 $OriginalUserProfile = $env:USERPROFILE
 $Failures = 0
 $Checks = 0
+$CleanupClones = @()
 
 function Assert-Equal {
     param(
@@ -99,11 +100,112 @@ try {
         Write-Error 'FAIL: writes account-specific SSH alias' -ErrorAction Continue
         $script:Failures++
     }
+
+    $CleanupRunnerSource = Join-Path $ProjectRoot 'bootstrap/run.ps1'
+    if (-not (Test-Path $CleanupRunnerSource)) {
+        throw "Cleanup runner is missing: $CleanupRunnerSource"
+    }
+
+    $PowerShellExecutable = (Get-Process -Id $PID).Path
+    foreach ($CleanupCase in @(
+        @{ Name = 'success'; ExitCode = 0 },
+        @{ Name = 'failure'; ExitCode = 23 }
+    )) {
+        $CleanupClone = Join-Path ([System.IO.Path]::GetTempPath()) ("github-personal-setup-{0}" -f [guid]::NewGuid())
+        $CleanupClones += $CleanupClone
+        $CleanupBootstrapDirectory = Join-Path $CleanupClone 'bootstrap'
+        $CleanupWindowsDirectory = Join-Path $CleanupClone 'windows'
+        New-Item -ItemType Directory -Path $CleanupBootstrapDirectory, $CleanupWindowsDirectory -Force | Out-Null
+        Copy-Item $CleanupRunnerSource (Join-Path $CleanupBootstrapDirectory 'run.ps1')
+
+        @'
+[System.IO.File]::WriteAllText($env:CLEANUP_MARKER, (Get-Location).Path)
+exit [int]$env:CLEANUP_SETUP_EXIT
+'@ | Set-Content -Path (Join-Path $CleanupWindowsDirectory 'setup.ps1') -Encoding UTF8
+
+        git -C $CleanupClone init -q
+        git -C $CleanupClone remote add origin https://github.com/protiktoken/github-personal-setup.git
+
+        $CleanupMarker = Join-Path $TestRoot ("cleanup-{0}.marker" -f $CleanupCase.Name)
+        $env:GITHUB_PERSONAL_SETUP_TEMP_ROOT = $CleanupClone
+        $env:CLEANUP_MARKER = $CleanupMarker
+        $env:CLEANUP_SETUP_EXIT = [string]$CleanupCase.ExitCode
+
+        Push-Location $Repository
+        try {
+            & $PowerShellExecutable -NoProfile -ExecutionPolicy Bypass -File (Join-Path $CleanupBootstrapDirectory 'run.ps1')
+            $CleanupStatus = $LASTEXITCODE
+        }
+        finally {
+            Pop-Location
+        }
+
+        Assert-Equal ([string]$CleanupCase.ExitCode) ([string]$CleanupStatus) "$($CleanupCase.Name) cleanup preserves setup exit code"
+        Assert-Equal 'True' ([string](Test-Path $CleanupMarker)) "$($CleanupCase.Name) cleanup invokes setup"
+        Assert-Equal 'False' ([string](Test-Path $CleanupClone)) "$($CleanupCase.Name) cleanup removes the temporary clone"
+    }
+
+    $LockedCleanupClone = Join-Path ([System.IO.Path]::GetTempPath()) ("github-personal-setup-{0}" -f [guid]::NewGuid())
+    $CleanupClones += $LockedCleanupClone
+    $LockedBootstrapDirectory = Join-Path $LockedCleanupClone 'bootstrap'
+    $LockedWindowsDirectory = Join-Path $LockedCleanupClone 'windows'
+    New-Item -ItemType Directory -Path $LockedBootstrapDirectory, $LockedWindowsDirectory -Force | Out-Null
+    Copy-Item $CleanupRunnerSource (Join-Path $LockedBootstrapDirectory 'run.ps1')
+    'exit 23' | Set-Content -Path (Join-Path $LockedWindowsDirectory 'setup.ps1') -Encoding UTF8
+    git -C $LockedCleanupClone init -q
+    git -C $LockedCleanupClone remote add origin https://github.com/protiktoken/github-personal-setup.git
+
+    $LockedFile = Join-Path $LockedCleanupClone 'cleanup.lock'
+    $LockStream = [System.IO.File]::Open(
+        $LockedFile,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+    $env:GITHUB_PERSONAL_SETUP_TEMP_ROOT = $LockedCleanupClone
+
+    Push-Location $Repository
+    try {
+        & $PowerShellExecutable -NoProfile -ExecutionPolicy Bypass -File (Join-Path $LockedBootstrapDirectory 'run.ps1')
+        $LockedCleanupStatus = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        $LockStream.Dispose()
+    }
+
+    Assert-Equal '23' ([string]$LockedCleanupStatus) 'cleanup failure does not overwrite the setup exit code'
+    Assert-Equal 'True' ([string](Test-Path $LockedCleanupClone)) 'failed cleanup leaves the clone for the outer wrapper'
+
+    $ManualClone = Join-Path $TestRoot 'manual-clone'
+    $CleanupClones += $ManualClone
+    $ManualBootstrapDirectory = Join-Path $ManualClone 'bootstrap'
+    New-Item -ItemType Directory -Path $ManualBootstrapDirectory -Force | Out-Null
+    Copy-Item $CleanupRunnerSource (Join-Path $ManualBootstrapDirectory 'run.ps1')
+    $env:GITHUB_PERSONAL_SETUP_TEMP_ROOT = $ManualClone
+
+    Push-Location $Repository
+    try {
+        & $PowerShellExecutable -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ManualBootstrapDirectory 'run.ps1')
+        $ManualCloneStatus = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+
+    Assert-Equal '1' ([string]$ManualCloneStatus) 'runner rejects a clone without the temporary name pattern'
+    Assert-Equal 'True' ([string](Test-Path $ManualClone)) 'rejected manual clone is never deleted'
 }
 finally {
     $env:PATH = $OriginalPath
     $env:HOME = $OriginalHome
     $env:USERPROFILE = $OriginalUserProfile
+    Remove-Item Env:GITHUB_PERSONAL_SETUP_TEMP_ROOT -ErrorAction SilentlyContinue
+    Remove-Item Env:CLEANUP_MARKER -ErrorAction SilentlyContinue
+    Remove-Item Env:CLEANUP_SETUP_EXIT -ErrorAction SilentlyContinue
+    foreach ($CleanupClone in $CleanupClones) {
+        Remove-Item -LiteralPath $CleanupClone -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item -Recurse -Force $TestRoot -ErrorAction SilentlyContinue
 }
 
