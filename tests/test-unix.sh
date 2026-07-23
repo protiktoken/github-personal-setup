@@ -131,6 +131,7 @@ test_successful_setup() {
     git -C "$repository" init -q -b main
 
     output="$(run_setup "$script_path" "$repository" "$home_directory" \
+        --yes \
         --username testuser \
         --name 'Test User' \
         --email test@example.com \
@@ -143,6 +144,133 @@ test_successful_setup() {
     assert_equal "git@github-testuser:testuser/example.git" "$(git -C "$repository" remote get-url origin 2>/dev/null || true)" "$platform_name normalizes origin"
     assert_contains "$(cat "$home_directory/.ssh/config" 2>/dev/null || true)" "Host github-testuser" "$platform_name writes SSH alias"
     assert_contains "$output" "git push -u origin main" "$platform_name prints push command"
+}
+
+test_restores_github_account_after_key_creation() {
+    local script_path="$1"
+    local platform_name="$2"
+    local case_root="$test_root/account-switch-$platform_name"
+    local repository="$case_root/repository"
+    local home_directory="$case_root/home"
+    local account_state="$case_root/account-state"
+    local status_code
+
+    mkdir -p "$repository" "$home_directory"
+    create_fake_commands "$home_directory/fake-bin"
+    git -C "$repository" init -q -b main
+    printf 'workuser\n' > "$account_state"
+
+    cat > "$home_directory/fake-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "auth" && "$2" == "switch" ]]; then
+    shift 2
+    while (($#)); do
+        if [[ "$1" == "--user" ]]; then
+            [[ "$2" != "testuser" || ! -e "$HOME/.ssh/id_ed25519_github_testuser" ]] || exit 2
+            printf '%s\n' "$2" > "$FAKE_GH_ACCOUNT_STATE"
+            exit 0
+        fi
+        shift
+    done
+    exit 0
+fi
+if [[ "$1" == "api" && "$2" == "user" ]]; then
+    cat "$FAKE_GH_ACCOUNT_STATE"
+fi
+exit 0
+EOF
+    chmod +x "$home_directory/fake-bin/gh"
+
+    FAKE_GH_ACCOUNT_STATE="$account_state" run_setup \
+        "$script_path" "$repository" "$home_directory" \
+        --yes \
+        --username testuser \
+        --name 'Test User' \
+        --email test@example.com \
+        --repo-url https://github.com/testuser/switched.git >/dev/null
+    status_code=$?
+
+    assert_equal "0" "$status_code" "$platform_name temporarily selects the requested GitHub CLI account"
+    assert_equal "workuser" "$(cat "$account_state")" "$platform_name restores the previously active GitHub CLI account"
+}
+
+test_declined_personal_setup_is_non_mutating() {
+    local script_path="$1"
+    local platform_name="$2"
+    local case_root="$test_root/declined-$platform_name"
+    local repository="$case_root/repository"
+    local home_directory="$case_root/home"
+    local gh_marker="$case_root/gh-called"
+    local output
+    local status_code
+
+    mkdir -p "$repository" "$home_directory"
+    create_fake_commands "$home_directory/fake-bin"
+    git -C "$repository" init -q -b main
+
+    cat > "$home_directory/fake-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+: > "$FAKE_GH_CALLED_MARKER"
+exit 0
+EOF
+    chmod +x "$home_directory/fake-bin/gh"
+
+    output="$(FAKE_GH_CALLED_MARKER="$gh_marker" run_setup_with_input \
+        "$script_path" "$repository" "$home_directory" 'n\n' \
+        --username testuser \
+        --name 'Test User' \
+        --email test@example.com \
+        --repo-url https://github.com/testuser/declined.git)"
+    status_code=$?
+
+    assert_equal "1" "$status_code" "$platform_name stops when personal setup is declined"
+    assert_contains "$output" "Configure this repository to use the personal GitHub account 'testuser'?" "$platform_name clearly confirms personal setup"
+    assert_equal "no" "$(if [[ -e "$gh_marker" ]]; then printf yes; else printf no; fi)" "$platform_name does not touch GitHub CLI when declined"
+    assert_equal "no" "$(if [[ -e "$home_directory/.ssh" ]]; then printf yes; else printf no; fi)" "$platform_name does not touch SSH when declined"
+    assert_equal "" "$(git -C "$repository" remote get-url origin 2>/dev/null || true)" "$platform_name does not set origin when declined"
+}
+
+test_restores_github_account_when_setup_fails() {
+    local script_path="$1"
+    local platform_name="$2"
+    local case_root="$test_root/restore-failure-$platform_name"
+    local repository="$case_root/repository"
+    local home_directory="$case_root/home"
+    local account_state="$case_root/account-state"
+    local status_code
+
+    mkdir -p "$repository" "$home_directory"
+    create_fake_commands "$home_directory/fake-bin"
+    git -C "$repository" init -q -b main
+    printf 'workuser\n' > "$account_state"
+
+    cat > "$home_directory/fake-bin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "auth" && "$2" == "switch" ]]; then
+    printf '%s\n' "$6" > "$FAKE_GH_ACCOUNT_STATE"
+elif [[ "$1" == "api" && "$2" == "user" ]]; then
+    cat "$FAKE_GH_ACCOUNT_STATE"
+fi
+exit 0
+EOF
+    cat > "$home_directory/fake-bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+printf 'SSH verification failed\n' >&2
+exit 255
+EOF
+    chmod +x "$home_directory/fake-bin/gh" "$home_directory/fake-bin/ssh"
+
+    FAKE_GH_ACCOUNT_STATE="$account_state" run_setup \
+        "$script_path" "$repository" "$home_directory" \
+        --yes \
+        --username testuser \
+        --name 'Test User' \
+        --email test@example.com \
+        --repo-url https://github.com/testuser/failure.git >/dev/null
+    status_code=$?
+
+    assert_equal "1" "$status_code" "$platform_name reports setup failure"
+    assert_equal "workuser" "$(cat "$account_state")" "$platform_name restores the GitHub CLI account after failure"
 }
 
 test_invalid_owner_is_non_mutating() {
@@ -158,6 +286,7 @@ test_invalid_owner_is_non_mutating() {
     git -C "$repository" init -q -b main
 
     run_setup "$script_path" "$repository" "$home_directory" \
+        --yes \
         --username testuser \
         --name 'Test User' \
         --email test@example.com \
@@ -185,6 +314,7 @@ test_forced_manual_setup() {
 
     output="$(run_setup_with_input "$script_path" "$repository" "$home_directory" '\n' \
         --manual \
+        --yes \
         --username testuser \
         --name 'Test User' \
         --email test@example.com \
@@ -234,6 +364,7 @@ test_incomplete_key_pair_is_rejected() {
     git -C "$repository" init -q -b main
 
     run_setup "$script_path" "$repository" "$home_directory" \
+        --yes \
         --username testuser \
         --name 'Test User' \
         --email test@example.com \
@@ -258,6 +389,7 @@ test_setup_is_idempotent() {
 
     for _ in 1 2; do
         run_setup "$script_path" "$repository" "$home_directory" \
+            --yes \
             --username testuser \
             --name 'Test User' \
             --email test@example.com \
@@ -277,6 +409,9 @@ for platform_name in macos linux; do
     fi
 
     test_successful_setup "$script_path" "$platform_name"
+    test_restores_github_account_after_key_creation "$script_path" "$platform_name"
+    test_declined_personal_setup_is_non_mutating "$script_path" "$platform_name"
+    test_restores_github_account_when_setup_fails "$script_path" "$platform_name"
     test_invalid_owner_is_non_mutating "$script_path" "$platform_name"
     test_forced_manual_setup "$script_path" "$platform_name"
     test_yes_replaces_origin "$script_path" "$platform_name"

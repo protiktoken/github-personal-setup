@@ -19,9 +19,25 @@ You need:
 3. A local Git repository created with `git init` or cloned from elsewhere.
 4. Git and OpenSSH installed.
 
-[GitHub CLI](https://cli.github.com/) is optional but recommended. When available, it uses GitHub's official browser login and uploads the generated public SSH key. The scripts never receive the resulting credential. Without GitHub CLI, the script opens GitHub's SSH-key page and asks you to add the public key manually.
+[GitHub CLI](https://cli.github.com/) is optional but recommended. When available, the setup command selects the requested GitHub account or opens GitHub's official browser login, creates the SSH key, and uploads its public half automatically. You do not need to run `gh auth` commands or paste a key before setup. The scripts never receive the resulting credential.
 
 When `ssh-keygen` creates a key, it asks for an optional passphrase. Entering a passphrase protects the private key if the file is copied; pressing Enter twice creates the key without one. The passphrase prompt belongs directly to `ssh-keygen`, not these scripts.
+
+### Automatic And Manual Authentication
+
+The recommended run-once command is the only command needed when GitHub CLI is installed:
+
+1. Enter the GitHub username, commit identity, and existing repository URL when prompted.
+2. Review the repository, personal account, identity, and new remote, then confirm the personal setup. Declining stops before GitHub CLI, SSH, or Git configuration is changed.
+3. Setup temporarily selects that GitHub CLI account. If it is not already available, a browser opens so you can sign in as that account.
+4. Setup creates an account-specific SSH key and asks for its optional passphrase.
+5. GitHub CLI uploads only the public key. Nothing needs to be copied or pasted.
+6. Setup restores whichever GitHub CLI account was active before setup.
+7. Setup verifies SSH, then configures the current repository.
+
+To avoid GitHub CLI, add `--manual` on macOS/Linux or `-Manual` on Windows. In manual mode, setup creates the key, copies the public key to the clipboard when possible, and opens [GitHub's new SSH key page](https://github.com/settings/ssh/new). Paste it into the **Key** field, enter any descriptive title, select **Add SSH key**, then return to the terminal and press Enter. Never paste the private key, whose filename does not end in `.pub`.
+
+If GitHub CLI is not installed, setup uses this manual flow automatically.
 
 ## Run Once (Recommended)
 
@@ -167,7 +183,9 @@ The URL owner must match the supplied username. The saved remote is normalized t
 git@github-username:username/repository.git
 ```
 
-This allows personal and work GitHub accounts to coexist without changing the machine's default Git identity.
+The `<username>` portion is generated from the personal GitHub username entered by each user; it is not a fixed project account. Only repositories whose remote uses that generated alias use the personal key. Repositories that keep their normal `github.com` remote continue using the machine's existing default GitHub configuration.
+
+This allows personal and work GitHub accounts to coexist without changing the machine's default Git identity or active GitHub CLI account. GitHub Copilot authentication is separate and is never inspected or changed by these scripts.
 
 ## Non-Interactive Arguments
 
@@ -193,7 +211,7 @@ Windows PowerShell:
   -RepositoryUrl https://github.com/octocat/example.git
 ```
 
-Use `--yes` on macOS/Linux or `-Yes` on Windows only when you intentionally want to replace a different existing `origin` without confirmation.
+Use `--yes` on macOS/Linux or `-Yes` on Windows only for automation where you explicitly consent to configuring the current repository for the supplied personal account without the confirmation prompt. It also permits replacing a different existing `origin`.
 
 Use `--manual` on macOS/Linux or `-Manual` on Windows to skip GitHub CLI and register the displayed public key through GitHub settings yourself.
 
@@ -233,6 +251,8 @@ They do not change the global Git author identity.
 - Never paste a GitHub password, personal access token, SSH passphrase, or private key into these scripts.
 - A passphrase is entered directly into `ssh-keygen`, which owns that prompt.
 - GitHub CLI authentication happens through GitHub's official browser/device flow.
+- The previously active GitHub CLI account is restored after automatic public-key registration.
+- GitHub Copilot authentication is not read or changed.
 - Only the public key (`.pub`) is uploaded or shown for manual registration.
 - A different existing `origin` requires confirmation before replacement.
 - Repository identity and remote changes happen only after SSH authentication succeeds.
@@ -268,12 +288,9 @@ GitHub's successful SSH test normally exits with status `1` while printing "succ
 
 ### GitHub CLI Is Using The Wrong Account
 
-```bash
-gh auth status --hostname github.com
-gh auth switch --hostname github.com --user <username>
-```
+Rerun the setup command and enter the intended GitHub username. Setup tries to select that account before creating an SSH key and opens browser login when the account is not yet available to GitHub CLI.
 
-Then rerun the platform setup script.
+If login was cancelled, rerunning is safe. Existing complete account-specific keys are reused, and repository identity and remote settings are not applied until SSH authentication succeeds. Use `gh auth status --hostname github.com` only when you need to inspect GitHub CLI's stored accounts directly.
 
 ### Repository Not Found
 

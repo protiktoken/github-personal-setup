@@ -51,9 +51,12 @@ echo Hi testuser! You have successfully authenticated, but GitHub does not provi
 exit /b 1
 '@ | Set-Content -Path (Join-Path $Directory 'ssh.cmd') -Encoding Ascii
 
-    @'
+        @'
 @echo off
-if "%~1"=="api" echo testuser
+if "%~1"=="api" type "%FAKE_GH_ACCOUNT_STATE%"
+if "%~1"=="auth" if "%~2"=="switch" (
+    echo %~6>"%FAKE_GH_ACCOUNT_STATE%"
+)
 exit /b 0
 '@ | Set-Content -Path (Join-Path $Directory 'gh.cmd') -Encoding Ascii
 }
@@ -72,6 +75,8 @@ try {
     $env:HOME = $TestHome
     $env:USERPROFILE = $TestHome
     $env:PATH = "$FakeBin;$OriginalPath"
+    $env:FAKE_GH_ACCOUNT_STATE = Join-Path $TestRoot 'gh-account.txt'
+    'workuser' | Set-Content -Path $env:FAKE_GH_ACCOUNT_STATE -Encoding Ascii
 
     git -C $Repository init -q -b main
     if ($LASTEXITCODE -ne 0) {
@@ -84,7 +89,8 @@ try {
             -GitHubUsername testuser `
             -CommitName 'Test User' `
             -CommitEmail test@example.com `
-            -RepositoryUrl https://github.com/testuser/example.git
+            -RepositoryUrl https://github.com/testuser/example.git `
+            -Yes
     }
     finally {
         Pop-Location
@@ -93,6 +99,7 @@ try {
     Assert-Equal 'Test User' (git -C $Repository config --local user.name) 'stores local name'
     Assert-Equal 'test@example.com' (git -C $Repository config --local user.email) 'stores local email'
     Assert-Equal 'git@github-testuser:testuser/example.git' (git -C $Repository remote get-url origin) 'normalizes origin'
+    Assert-Equal 'workuser' ((Get-Content -Raw $env:FAKE_GH_ACCOUNT_STATE).Trim()) 'restores the previously active GitHub CLI account'
 
     $SshConfig = Get-Content -Raw (Join-Path $TestHome '.ssh/config')
     $script:Checks++
@@ -203,6 +210,7 @@ finally {
     Remove-Item Env:GITHUB_PERSONAL_SETUP_TEMP_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:CLEANUP_MARKER -ErrorAction SilentlyContinue
     Remove-Item Env:CLEANUP_SETUP_EXIT -ErrorAction SilentlyContinue
+    Remove-Item Env:FAKE_GH_ACCOUNT_STATE -ErrorAction SilentlyContinue
     foreach ($CleanupClone in $CleanupClones) {
         Remove-Item -LiteralPath $CleanupClone -Recurse -Force -ErrorAction SilentlyContinue
     }

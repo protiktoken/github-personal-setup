@@ -205,69 +205,93 @@ if ($LASTEXITCODE -ne 0) {
     $ExistingRemote = ''
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ExistingRemote) -and $ExistingRemote -cne $PersonalRemote -and -not $Yes) {
-    Write-Host "Current origin:  $ExistingRemote"
-    Write-Host "Personal origin: $PersonalRemote"
-    $Confirmation = Read-Host 'Replace origin? [y/N]'
+if ($ExistingRemote -cne $PersonalRemote -and -not $Yes) {
+    Write-Host ''
+    Write-Host 'Personal GitHub setup'
+    Write-Host ''
+    Write-Host "Repository:      $RepositoryRoot"
+    Write-Host "GitHub account:  $GitHubUsername"
+    Write-Host "Commit identity: $CommitName <$CommitEmail>"
+    Write-Host "New origin:      $PersonalRemote"
+    Write-Host ''
+    $Confirmation = Read-Host "Configure this repository to use the personal GitHub account '$GitHubUsername'? [y/N]"
     if ($Confirmation -notmatch '^(?i:y|yes)$') {
         Stop-WithError 'No changes made.'
     }
 }
 
-if (((Test-Path $KeyPath) -and -not (Test-Path $PublicKeyPath)) -or (-not (Test-Path $KeyPath) -and (Test-Path $PublicKeyPath))) {
-    Stop-WithError "Incomplete SSH key pair at $KeyPath. Move it aside or restore the missing file."
-}
+$OriginalGitHubCliUser = ''
+$RestoreGitHubCliAccount = $false
 
-New-Item -ItemType Directory -Path $SshDirectory -Force | Out-Null
-
-if (-not (Test-Path $KeyPath)) {
-    Write-Host ''
-    Write-Host 'Creating an account-specific SSH key. Enter an optional passphrase directly in ssh-keygen.'
-    & ssh-keygen -t ed25519 -C $CommitEmail -f $KeyPath
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithError 'ssh-keygen did not create the SSH key.'
-    }
-}
-
-if (-not (Test-Path $KeyPath) -or -not (Test-Path $PublicKeyPath) -or (Get-Item $KeyPath).Length -eq 0 -or (Get-Item $PublicKeyPath).Length -eq 0) {
-    Stop-WithError "SSH key creation failed at $KeyPath."
-}
-
-Write-SshAlias -SshConfig $SshConfig -HostAlias $HostAlias -KeyPath $KeyPath
-
-if ($Manual) {
-    Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
-}
-elseif (Get-Command gh -ErrorAction SilentlyContinue) {
-    & gh auth status --hostname github.com *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host ''
-        Write-Host 'GitHub CLI will open a browser for secure authentication.'
-        & gh auth login --hostname github.com --git-protocol ssh --web
+try {
+    if (-not $Manual -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        $OriginalGitHubCliUser = (& gh api user --jq .login 2>$null | Out-String).Trim()
+        $RestoreGitHubCliAccount = -not [string]::IsNullOrWhiteSpace($OriginalGitHubCliUser) -and
+            -not $OriginalGitHubCliUser.Equals($GitHubUsername, [System.StringComparison]::OrdinalIgnoreCase)
+        & gh auth switch --hostname github.com --user $GitHubUsername *> $null
         if ($LASTEXITCODE -ne 0) {
-            Stop-WithError 'GitHub CLI authentication did not complete.'
+            Write-Host ''
+            Write-Host "GitHub CLI will open a browser to sign in as $GitHubUsername."
+            & gh auth login --hostname github.com --git-protocol ssh --web
+            if ($LASTEXITCODE -ne 0) {
+                Stop-WithError 'GitHub CLI authentication did not complete.'
+            }
+        }
+
+        $AuthenticatedUser = (& gh api user --jq .login 2>$null | Out-String).Trim()
+        if (-not $AuthenticatedUser.Equals($GitHubUsername, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Stop-WithError "GitHub CLI is authenticated as '$AuthenticatedUser', not '$GitHubUsername'."
         }
     }
 
-    $AuthenticatedUser = (& gh api user --jq .login 2>$null | Out-String).Trim()
-    if (-not $AuthenticatedUser.Equals($GitHubUsername, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Stop-WithError "GitHub CLI is authenticated as '$AuthenticatedUser', not '$GitHubUsername'. Run: gh auth switch --hostname github.com --user $GitHubUsername"
+    if (((Test-Path $KeyPath) -and -not (Test-Path $PublicKeyPath)) -or (-not (Test-Path $KeyPath) -and (Test-Path $PublicKeyPath))) {
+        Stop-WithError "Incomplete SSH key pair at $KeyPath. Move it aside or restore the missing file."
     }
 
-    $ComputerName = if ($env:COMPUTERNAME) { $env:COMPUTERNAME.ToLowerInvariant() } else { 'windows' }
-    $KeyTitle = "github-personal-setup-$ComputerName-$UsernameLower"
-    & gh ssh-key add $PublicKeyPath --title $KeyTitle *> $null
-    if ($LASTEXITCODE -ne 0) {
-        $PreflightOutput = (& ssh -o StrictHostKeyChecking=accept-new -T $HostAlias 2>&1 | Out-String)
-        if ($PreflightOutput -notmatch 'successfully authenticated') {
-            Write-Host 'GitHub CLI could not add the key. Continuing with manual public-key registration.'
-            Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
+    New-Item -ItemType Directory -Path $SshDirectory -Force | Out-Null
+
+    if (-not (Test-Path $KeyPath)) {
+        Write-Host ''
+        Write-Host 'Creating an account-specific SSH key. Enter an optional passphrase directly in ssh-keygen.'
+        & ssh-keygen -t ed25519 -C $CommitEmail -f $KeyPath
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithError 'ssh-keygen did not create the SSH key.'
         }
+    }
+
+    if (-not (Test-Path $KeyPath) -or -not (Test-Path $PublicKeyPath) -or (Get-Item $KeyPath).Length -eq 0 -or (Get-Item $PublicKeyPath).Length -eq 0) {
+        Stop-WithError "SSH key creation failed at $KeyPath."
+    }
+
+    Write-SshAlias -SshConfig $SshConfig -HostAlias $HostAlias -KeyPath $KeyPath
+
+    if ($Manual) {
+        Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
+    }
+    elseif (Get-Command gh -ErrorAction SilentlyContinue) {
+        $ComputerName = if ($env:COMPUTERNAME) { $env:COMPUTERNAME.ToLowerInvariant() } else { 'windows' }
+        $KeyTitle = "github-personal-setup-$ComputerName-$UsernameLower"
+        & gh ssh-key add $PublicKeyPath --title $KeyTitle *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $PreflightOutput = (& ssh -o StrictHostKeyChecking=accept-new -T $HostAlias 2>&1 | Out-String)
+            if ($PreflightOutput -notmatch 'successfully authenticated') {
+                Write-Host 'GitHub CLI could not add the key. Continuing with manual public-key registration.'
+                Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
+            }
+        }
+    }
+    else {
+        Write-Host 'GitHub CLI is not installed.'
+        Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
     }
 }
-else {
-    Write-Host 'GitHub CLI is not installed.'
-    Register-PublicKeyManually -PublicKeyPath $PublicKeyPath
+finally {
+    if ($RestoreGitHubCliAccount) {
+        & gh auth switch --hostname github.com --user $OriginalGitHubCliUser *> $null
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("Warning: Could not restore the previously active GitHub CLI account: $OriginalGitHubCliUser")
+        }
+    }
 }
 
 $SshOutput = (& ssh -o StrictHostKeyChecking=accept-new -T $HostAlias 2>&1 | Out-String)

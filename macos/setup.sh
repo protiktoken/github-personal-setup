@@ -8,6 +8,8 @@ commit_email=""
 repository_url=""
 assume_yes=false
 manual_auth=false
+original_github_cli_user=""
+restore_github_cli_account=false
 
 usage() {
     cat <<'EOF'
@@ -78,6 +80,40 @@ register_key_manually() {
     open_ssh_settings
     printf 'Open https://github.com/settings/ssh/new, add the key, then press Enter to continue: '
     IFS= read -r _ || die "SSH key registration was not confirmed."
+}
+
+prepare_github_cli_account() {
+    local requested_username="$1"
+    local requested_username_lower="$2"
+    local authenticated_user
+    local authenticated_user_lower
+
+    original_github_cli_user="$(gh api user --jq .login 2>/dev/null || true)"
+    if [[ -n "$original_github_cli_user" && "$(printf '%s' "$original_github_cli_user" | tr '[:upper:]' '[:lower:]')" != "$requested_username_lower" ]]; then
+        restore_github_cli_account=true
+    fi
+
+    if ! gh auth switch --hostname github.com --user "$requested_username" >/dev/null 2>&1; then
+        printf '\nGitHub CLI will open a browser to sign in as %s.\n' "$requested_username"
+        gh auth login --hostname github.com --git-protocol ssh --web || die "GitHub CLI authentication did not complete."
+    fi
+
+    authenticated_user="$(gh api user --jq .login 2>/dev/null || true)"
+    authenticated_user_lower="$(printf '%s' "$authenticated_user" | tr '[:upper:]' '[:lower:]')"
+    [[ "$authenticated_user_lower" == "$requested_username_lower" ]] || die "GitHub CLI is authenticated as '${authenticated_user:-unknown}', not '$requested_username'."
+}
+
+restore_original_github_cli_account() {
+    local exit_code=$?
+
+    trap - EXIT
+
+    if [[ "$restore_github_cli_account" == true ]]; then
+        gh auth switch --hostname github.com --user "$original_github_cli_user" >/dev/null 2>&1 ||
+            printf 'Warning: Could not restore the previously active GitHub CLI account: %s\n' "$original_github_cli_user" >&2
+    fi
+
+    exit "$exit_code"
 }
 
 write_ssh_alias() {
@@ -243,15 +279,23 @@ if git remote get-url origin >/dev/null 2>&1; then
     existing_remote="$(git remote get-url origin)"
 fi
 
-if [[ -n "$existing_remote" && "$existing_remote" != "$personal_remote" && "$assume_yes" != true ]]; then
-    printf 'Current origin:  %s\n' "$existing_remote"
-    printf 'Personal origin: %s\n' "$personal_remote"
-    printf 'Replace origin? [y/N]: '
+if [[ "$existing_remote" != "$personal_remote" && "$assume_yes" != true ]]; then
+    printf '\nPersonal GitHub setup\n\n'
+    printf 'Repository:      %s\n' "$repository_root"
+    printf 'GitHub account:  %s\n' "$username"
+    printf 'Commit identity: %s <%s>\n' "$commit_name" "$commit_email"
+    printf 'New origin:      %s\n\n' "$personal_remote"
+    printf "Configure this repository to use the personal GitHub account '%s'? [y/N]: " "$username"
     IFS= read -r confirmation || confirmation=""
     case "$confirmation" in
         y|Y|yes|Yes|YES) ;;
         *) die "No changes made." ;;
     esac
+fi
+
+if [[ "$manual_auth" != true ]] && command -v gh >/dev/null 2>&1; then
+    trap restore_original_github_cli_account EXIT
+    prepare_github_cli_account "$username" "$username_lower"
 fi
 
 if [[ -e "$key_path" && ! -e "$key_path.pub" ]] || [[ ! -e "$key_path" && -e "$key_path.pub" ]]; then
@@ -278,15 +322,6 @@ write_ssh_alias "$ssh_config" "$host_alias" "$key_path"
 if [[ "$manual_auth" == true ]]; then
     register_key_manually "$key_path.pub"
 elif command -v gh >/dev/null 2>&1; then
-    if ! gh auth status --hostname github.com >/dev/null 2>&1; then
-        printf '\nGitHub CLI will open a browser for secure authentication.\n'
-        gh auth login --hostname github.com --git-protocol ssh --web || die "GitHub CLI authentication did not complete."
-    fi
-
-    authenticated_user="$(gh api user --jq .login 2>/dev/null || true)"
-    authenticated_user_lower="$(printf '%s' "$authenticated_user" | tr '[:upper:]' '[:lower:]')"
-    [[ "$authenticated_user_lower" == "$username_lower" ]] || die "GitHub CLI is authenticated as '${authenticated_user:-unknown}', not '$username'. Run: gh auth switch --hostname github.com --user $username"
-
     key_title="github-personal-setup-$(hostname 2>/dev/null || printf machine)-${username_lower}"
     if ! gh ssh-key add "$key_path.pub" --title "$key_title" >/dev/null 2>&1; then
         printf 'GitHub CLI did not add the key. It may already be registered; verifying SSH next.\n'

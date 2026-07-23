@@ -80,6 +80,24 @@ if ! grep -Fq 'exit 0' "$test_script_path"; then
     fail "Windows test harness does not explicitly return success"
 fi
 
+account_switch_line="$(grep -nF '& gh auth switch --hostname github.com --user $GitHubUsername' "$script_path" | head -n 1 | cut -d: -f1)"
+key_generation_line="$(grep -nF '& ssh-keygen -t ed25519' "$script_path" | head -n 1 | cut -d: -f1)"
+if [[ -z "$account_switch_line" || -z "$key_generation_line" || "$account_switch_line" -ge "$key_generation_line" ]]; then
+    fail "Windows setup does not select the GitHub CLI account before creating the SSH key"
+fi
+
+windows_safety_patterns=(
+    "Configure this repository to use the personal GitHub account"
+    'finally {'
+    'gh auth switch --hostname github.com --user $OriginalGitHubCliUser'
+)
+
+for pattern in "${windows_safety_patterns[@]}"; do
+    if ! grep -Fq "$pattern" "$script_path"; then
+        fail "Windows setup does not preserve the personal-account safety contract: $pattern"
+    fi
+done
+
 if ((failures > 0)); then
     printf '%d Windows contract checks failed\n' "$failures" >&2
     exit 1
