@@ -1,0 +1,29 @@
+name: Test setup scripts
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    strategy:
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Bash tests
+        run: bash tests/run.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: ./tests/test-windows.ps1
