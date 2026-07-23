@@ -5,6 +5,7 @@ set -u
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 script_path="$project_root/windows/setup.ps1"
 cleanup_script_path="$project_root/bootstrap/run.ps1"
+test_script_path="$project_root/tests/test-windows.ps1"
 readme_path="$project_root/README.md"
 failures=0
 
@@ -74,6 +75,10 @@ for pattern in "${windows_wrapper_patterns[@]}"; do
         fail "Windows run-once documentation does not preserve the setup exit code: $pattern"
     fi
 done
+
+if ! grep -Fq 'exit 0' "$test_script_path"; then
+    fail "Windows test harness does not explicitly return success"
+fi
 
 if ((failures > 0)); then
     printf '%d Windows contract checks failed\n' "$failures" >&2

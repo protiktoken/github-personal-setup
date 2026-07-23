@@ -214,3 +214,4 @@ if ($Failures -gt 0) {
 }
 
 Write-Output "PASS: $Checks checks"
+exit 0
