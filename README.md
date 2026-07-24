@@ -1,49 +1,35 @@
 # GitHub Personal Setup
 
-Configure a local Git repository to use a personal GitHub account without pasting a password, personal access token, or private SSH key into a script.
+Configure one local Git repository to use a personal GitHub account without changing the machine's default work account or GitHub Copilot login. Native scripts support macOS, Linux, and Windows PowerShell.
 
-The project provides separate native setup scripts for:
-
-- macOS
-- Linux
-- Windows PowerShell
-
-Each script creates or reuses an account-specific SSH key, configures an SSH host alias, verifies GitHub authentication, and applies the selected identity and remote to the current repository only.
+Setup creates or reuses a personal SSH key, verifies it with GitHub, and configures the current repository's author and `origin`. It never asks for a password, token, or private key.
 
 ## Before You Start
 
 You need:
 
-1. An existing GitHub account.
-2. An existing empty or populated repository under that account.
-3. A local Git repository created with `git init` or cloned from elsewhere.
-4. Git and OpenSSH installed.
+1. Git and OpenSSH.
+2. A personal GitHub account.
+3. An existing local Git repository.
+4. An existing GitHub repository you can access. It may belong to you, an organization, or someone who added you as a collaborator.
 
-[GitHub CLI](https://cli.github.com/) is optional but recommended. When available, the setup command selects the requested GitHub account or opens GitHub's official browser login, creates the SSH key, and uploads its public half automatically. You do not need to run `gh auth` commands or paste a key before setup. The scripts never receive the resulting credential.
+[GitHub CLI](https://cli.github.com/) is optional but recommended. Without it, setup guides you through adding the public SSH key manually.
 
-When `ssh-keygen` creates a key, it asks for an optional passphrase. Entering a passphrase protects the private key if the file is copied; pressing Enter twice creates the key without one. The passphrase prompt belongs directly to `ssh-keygen`, not these scripts.
+## What You Do
 
-### Automatic And Manual Authentication
+1. Open a terminal in the local repository you want to configure.
+2. Run the command for your operating system below.
+3. Enter your personal GitHub username, commit name, commit email, and the existing GitHub repository URL.
+4. Review the summary, especially the repository owner and new remote, then confirm. Declining stops before anything changes.
+5. If `ssh-keygen` asks for a passphrase, choose one or press Enter twice for no passphrase.
+6. If a GitHub browser login opens, sign in with the personal account you entered.
+7. After setup succeeds, run the printed `git push` command.
 
-The recommended run-once command is the only command needed when GitHub CLI is installed:
-
-1. Enter the GitHub username, commit identity, and existing repository URL when prompted.
-2. Review the repository, personal account, identity, and new remote, then confirm the personal setup. Declining stops before GitHub CLI, SSH, or Git configuration is changed.
-3. Setup temporarily selects that GitHub CLI account. If it is not already available, a browser opens so you can sign in as that account.
-4. Setup creates an account-specific SSH key and asks for its optional passphrase.
-5. GitHub CLI uploads only the public key. Nothing needs to be copied or pasted.
-6. Setup restores whichever GitHub CLI account was active before setup.
-7. Setup verifies SSH, then configures the current repository.
-
-To avoid GitHub CLI, add `--manual` on macOS/Linux or `-Manual` on Windows. In manual mode, setup creates the key, copies the public key to the clipboard when possible, and opens [GitHub's new SSH key page](https://github.com/settings/ssh/new). Paste it into the **Key** field, enter any descriptive title, select **Add SSH key**, then return to the terminal and press Enter. Never paste the private key, whose filename does not end in `.pub`.
-
-If GitHub CLI is not installed, setup uses this manual flow automatically.
+With GitHub CLI, setup temporarily selects the personal account, uploads only the public key, and restores the previously active account. Without GitHub CLI, it opens [GitHub's new SSH key page](https://github.com/settings/ssh/new) and copies the public key when possible. Paste it into **Key**, enter a title, select **Add SSH key**, return to the terminal, and press Enter. Never paste the private key, whose filename does not end in `.pub`.
 
 ## Run Once (Recommended)
 
-The target GitHub repository must already exist. These scripts do not create repositories, commit files, or push code.
-
-The run-once commands clone this project into a uniquely named system temporary directory. The runner and its outer wrapper both attempt to remove that clone after setup succeeds, fails, or is interrupted. If the operating system prevents deletion, a warning identifies the leftover directory without overwriting the setup result. The local repository being configured and the SSH/Git settings created by setup are never deleted.
+The GitHub repository must already exist. Setup does not create repositories, commit files, or push code. These commands use a temporary clone of this project and remove it afterward; cleanup never deletes the repository being configured or its SSH/Git settings.
 
 ```mermaid
 flowchart TD
@@ -88,9 +74,7 @@ git rev-parse --show-toplevel >/dev/null && (
 )
 ```
 
-The runner selects macOS or Linux automatically. Add setup options after `run.sh`, for example `--manual` to register the public SSH key yourself.
-
-The macOS setup uses `pbcopy` and `open` for manual registration and enables Apple's Keychain integration. Linux uses `wl-copy` or `xclip` when available and opens GitHub with `xdg-open`.
+The runner selects macOS or Linux automatically.
 
 ### Windows PowerShell
 
@@ -137,17 +121,97 @@ $powerShellExecutable = (Get-Process -Id $PID).Path
 }
 ```
 
-Add setup options after `run.ps1`, for example `-Manual`. Windows uses `Set-Clipboard` and opens the GitHub SSH-key page for manual registration.
+## Accounts, Owners, And Remotes
+
+Setup asks for four values:
+
+- **Personal GitHub username:** selects the personal account and SSH key.
+- **Commit name and email:** set the author identity only in the current repository.
+- **Repository URL:** identifies the existing repository to use.
+
+Accepted URL formats include:
+
+```text
+https://github.com/owner/repository.git
+git@github.com:owner/repository.git
+ssh://git@github.com/owner/repository.git
+```
+
+The URL owner may be your username, an organization, or another user who granted you collaborator access. Setup preserves that owner while routing SSH through your personal key:
+
+```text
+git@github-personal-username:repository-owner/repository.git
+```
+
+For example, personal user `octocat` collaborating on `hubot/example` gets:
+
+```text
+git@github-octocat:hubot/example.git
+```
+
+Only remotes using `github-<personal-username>` use the personal key. Normal `github.com` remotes continue using the machine's default GitHub configuration. GitHub still enforces repository permissions.
+
+## Options
+
+- `--manual` on macOS/Linux or `-Manual` on Windows skips GitHub CLI and guides you through adding the public key manually.
+- `--yes` on macOS/Linux or `-Yes` on Windows skips confirmation for automation and permits replacing a different `origin`.
+
+Example with all values supplied:
+
+```bash
+bash setup.sh \
+  --username octocat \
+  --name "The Octocat" \
+  --email octocat@users.noreply.github.com \
+  --repo-url https://github.com/hubot/example.git
+```
+
+```powershell
+.\setup.ps1 `
+  -GitHubUsername octocat `
+  -CommitName 'The Octocat' `
+  -CommitEmail octocat@users.noreply.github.com `
+  -RepositoryUrl https://github.com/hubot/example.git
+```
+
+## What Changes
+
+Setup may create an account-specific key pair and a clearly marked block in `~/.ssh/config`:
+
+```text
+~/.ssh/id_ed25519_github_<username>
+~/.ssh/id_ed25519_github_<username>.pub
+
+# >>> github-personal-setup:github-<username> >>>
+Host github-<username>
+  HostName github.com
+  User git
+  IdentityFile "..."
+  IdentitiesOnly yes
+# <<< github-personal-setup:github-<username> <<<
+```
+
+In the current repository, it sets `user.name`, `user.email`, and `remote.origin.url`.
+
+Setup does **not** change:
+
+- Global Git author settings.
+- Other repositories or their remotes.
+- The machine's default GitHub SSH identity.
+- GitHub Copilot authentication.
+- The GitHub CLI account that was active before setup.
+
+Existing SSH configuration is preserved. A different `origin` requires confirmation, and repository settings are applied only after SSH authentication succeeds.
 
 ## Keep A Reusable Copy (Optional)
 
-Contributors or users configuring many repositories can keep one clone instead:
+To configure many repositories, clone this project once:
 
 ```bash
 git clone https://github.com/protiktoken/github-personal-setup.git
 ```
 
-Run the relevant platform script from inside the repository you want to configure:
+From the repository you want to configure, run the relevant script:
 
 ```bash
 bash /path/to/github-personal-setup/macos/setup.sh
@@ -160,124 +224,15 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\github-personal-setup\window
 
 Manual clones are never deleted automatically.
 
-## Questions The Scripts Ask
-
-Every script asks for:
-
-- GitHub username
-- Git commit author name
-- Git commit author email
-- Existing GitHub repository HTTPS or SSH URL
-
-Accepted repository URL examples:
-
-```text
-https://github.com/username/repository.git
-git@github.com:username/repository.git
-ssh://git@github.com/username/repository.git
-```
-
-The supplied username selects the personal SSH identity. The URL owner selects the repository path, so it can be your username, an organization, or another user who has granted you collaborator access. The saved remote is normalized to an account-specific SSH alias while preserving the URL owner:
-
-```text
-git@github-personal-username:repository-owner/repository.git
-```
-
-For example, personal user `octocat` collaborating on `hubot/example` gets:
-
-```text
-git@github-octocat:hubot/example.git
-```
-
-The alias username is generated from the personal GitHub username entered by each user; it is not a fixed project account. Only repositories whose remote uses that generated alias use the personal key. Repositories that keep their normal `github.com` remote continue using the machine's existing default GitHub configuration. GitHub enforces whether that personal account has permission to access the repository.
-
-This allows personal and work GitHub accounts to coexist without changing the machine's default Git identity or active GitHub CLI account. GitHub Copilot authentication is separate and is never inspected or changed by these scripts.
-
-## Non-Interactive Arguments
-
-The same values can be supplied as command-line arguments.
-
-macOS or Linux:
-
-```bash
-bash setup.sh \
-  --username octocat \
-  --name "The Octocat" \
-  --email octocat@users.noreply.github.com \
-  --repo-url https://github.com/octocat/example.git
-```
-
-Windows PowerShell:
-
-```powershell
-.\setup.ps1 `
-  -GitHubUsername octocat `
-  -CommitName 'The Octocat' `
-  -CommitEmail octocat@users.noreply.github.com `
-  -RepositoryUrl https://github.com/octocat/example.git
-```
-
-Use `--yes` on macOS/Linux or `-Yes` on Windows only for automation where you explicitly consent to configuring the current repository for the supplied personal account without the confirmation prompt. It also permits replacing a different existing `origin`.
-
-Use `--manual` on macOS/Linux or `-Manual` on Windows to skip GitHub CLI and register the displayed public key through GitHub settings yourself.
-
-## What Changes
-
-The scripts may create:
-
-```text
-~/.ssh/id_ed25519_github_<username>
-~/.ssh/id_ed25519_github_<username>.pub
-```
-
-They maintain a clearly marked account block in `~/.ssh/config`:
-
-```text
-# >>> github-personal-setup:github-<username> >>>
-Host github-<username>
-  HostName github.com
-  User git
-  IdentityFile "..."
-  IdentitiesOnly yes
-# <<< github-personal-setup:github-<username> <<<
-```
-
-Inside the current repository, they set:
-
-```text
-user.name
-user.email
-remote.origin.url
-```
-
-They do not change the global Git author identity.
-
-## Security Model
-
-- Never paste a GitHub password, personal access token, SSH passphrase, or private key into these scripts.
-- A passphrase is entered directly into `ssh-keygen`, which owns that prompt.
-- GitHub CLI authentication happens through GitHub's official browser/device flow.
-- The previously active GitHub CLI account is restored after automatic public-key registration.
-- GitHub Copilot authentication is not read or changed.
-- Only the public key (`.pub`) is uploaded or shown for manual registration.
-- A different existing `origin` requires confirmation before replacement.
-- Repository identity and remote changes happen only after SSH authentication succeeds.
-- Existing SSH configuration is preserved. Each account is maintained inside its own clearly marked block.
-- The first SSH verification uses `StrictHostKeyChecking=accept-new`, which accepts and records a previously unseen GitHub host key but rejects a changed key.
-
-Review scripts before running them, especially when using setup automation obtained from someone else.
-
 ## After Setup
 
-If the local repository has no commit yet:
+Use the push command printed by setup. For a new repository, this is typically:
 
 ```bash
 git add .
 git commit -m "Initial commit"
 git push -u origin main
 ```
-
-For an existing branch, use the branch-specific push command printed by the script.
 
 Verify the configuration at any time:
 
@@ -294,37 +249,29 @@ GitHub's successful SSH test normally exits with status `1` while printing "succ
 
 ### GitHub CLI Is Using The Wrong Account
 
-Rerun the setup command and enter the intended GitHub username. Setup tries to select that account before creating an SSH key and opens browser login when the account is not yet available to GitHub CLI.
-
-If login was cancelled, rerunning is safe. Existing complete account-specific keys are reused, and repository identity and remote settings are not applied until SSH authentication succeeds. Use `gh auth status --hostname github.com` only when you need to inspect GitHub CLI's stored accounts directly.
+Rerun setup with the intended personal username. Setup selects that account before creating the key and restores the previously active account afterward. If the account is unavailable, GitHub CLI opens browser login.
 
 ### Repository Not Found
 
-Confirm that the GitHub repository already exists at the supplied URL and that the personal account owns it, belongs to its organization, or has been added as a collaborator.
+Confirm that the repository exists at the supplied URL and that the personal account owns it, belongs to its organization, or has collaborator access.
 
 ### SSH Authentication Fails
 
-Confirm that the public key shown by the script appears under [GitHub SSH keys](https://github.com/settings/keys), then rerun:
+Confirm that the public key appears under [GitHub SSH keys](https://github.com/settings/keys), then run:
 
 ```bash
 ssh -vT git@github-<username>
 ```
 
-The verbose output shows which key SSH attempted to use.
-
 ### Corporate Network Blocks SSH
 
-Some managed networks block outbound SSH on port 22. Try another network or ask the network administrator whether GitHub SSH access is permitted. Do not disable TLS or SSH verification as a workaround.
+Some managed networks block SSH on port 22. Try another network or ask the network administrator whether GitHub SSH is permitted. Do not disable TLS or SSH verification.
 
 ## Tests
-
-On macOS or Linux:
 
 ```bash
 bash tests/run.sh
 ```
-
-On Windows PowerShell:
 
 ```powershell
 .\tests\test-windows.ps1
