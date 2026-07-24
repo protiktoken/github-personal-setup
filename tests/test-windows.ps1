@@ -108,6 +108,25 @@ try {
         $script:Failures++
     }
 
+    $CollaboratorRepository = Join-Path $TestRoot 'collaborator-repository'
+    New-Item -ItemType Directory -Path $CollaboratorRepository -Force | Out-Null
+    git -C $CollaboratorRepository init -q -b main
+
+    Push-Location $CollaboratorRepository
+    try {
+        & $ScriptUnderTest `
+            -GitHubUsername testuser `
+            -CommitName 'Test User' `
+            -CommitEmail test@example.com `
+            -RepositoryUrl https://github.com/another-user/shared.git `
+            -Yes
+    }
+    finally {
+        Pop-Location
+    }
+
+    Assert-Equal 'git@github-testuser:another-user/shared.git' (git -C $CollaboratorRepository remote get-url origin) 'preserves collaborator repository owner'
+
     $CleanupRunnerSource = Join-Path $ProjectRoot 'bootstrap/run.ps1'
     if (-not (Test-Path $CleanupRunnerSource)) {
         throw "Cleanup runner is missing: $CleanupRunnerSource"

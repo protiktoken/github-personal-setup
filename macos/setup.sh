@@ -259,9 +259,12 @@ repository_path="${repository_path%.git}"
 owner="${repository_path%%/*}"
 repository_name="${repository_path#*/}"
 username_lower="$(printf '%s' "$username" | tr '[:upper:]' '[:lower:]')"
-owner_lower="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')"
 
-[[ "$owner_lower" == "$username_lower" ]] || die "Repository owner '$owner' does not match GitHub username '$username'."
+case "$owner" in
+    ""|.|..|*[!A-Za-z0-9_.-]*)
+        die "The URL contains an invalid repository owner."
+        ;;
+esac
 case "$repository_name" in
     ""|.|..|*/*|*[!A-Za-z0-9._-]*)
         die "The URL contains an invalid repository name."
@@ -269,7 +272,7 @@ case "$repository_name" in
 esac
 
 host_alias="github-${username_lower}"
-personal_remote="git@${host_alias}:${username}/${repository_name}.git"
+personal_remote="git@${host_alias}:${owner}/${repository_name}.git"
 ssh_directory="$HOME/.ssh"
 key_path="$ssh_directory/id_ed25519_github_${username_lower}"
 ssh_config="$ssh_directory/config"
@@ -283,6 +286,7 @@ if [[ "$existing_remote" != "$personal_remote" && "$assume_yes" != true ]]; then
     printf '\nPersonal GitHub setup\n\n'
     printf 'Repository:      %s\n' "$repository_root"
     printf 'GitHub account:  %s\n' "$username"
+    printf 'Repository owner: %s\n' "$owner"
     printf 'Commit identity: %s <%s>\n' "$commit_name" "$commit_email"
     printf 'New origin:      %s\n\n' "$personal_remote"
     printf "Configure this repository to use the personal GitHub account '%s'? [y/N]: " "$username"

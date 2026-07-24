@@ -273,10 +273,10 @@ EOF
     assert_equal "workuser" "$(cat "$account_state")" "$platform_name restores the GitHub CLI account after failure"
 }
 
-test_invalid_owner_is_non_mutating() {
+test_collaborator_repository_setup() {
     local script_path="$1"
     local platform_name="$2"
-    local case_root="$test_root/invalid-owner-$platform_name"
+    local case_root="$test_root/collaborator-$platform_name"
     local repository="$case_root/repository"
     local home_directory="$case_root/home"
     local status_code
@@ -293,10 +293,10 @@ test_invalid_owner_is_non_mutating() {
         --repo-url https://github.com/another-user/example.git >/dev/null
     status_code=$?
 
-    assert_equal "1" "$status_code" "$platform_name rejects another owner"
-    assert_equal "" "$(git -C "$repository" config --local user.name 2>/dev/null || true)" "$platform_name leaves identity unchanged"
-    assert_equal "" "$(git -C "$repository" remote get-url origin 2>/dev/null || true)" "$platform_name leaves origin unchanged"
-    assert_equal "no" "$(if [[ -e "$home_directory/.ssh/config" ]]; then printf yes; else printf no; fi)" "$platform_name leaves SSH config unchanged"
+    assert_equal "0" "$status_code" "$platform_name configures a collaborator-owned repository"
+    assert_equal "Test User" "$(git -C "$repository" config --local user.name 2>/dev/null || true)" "$platform_name stores collaborator identity locally"
+    assert_equal "git@github-testuser:another-user/example.git" "$(git -C "$repository" remote get-url origin 2>/dev/null || true)" "$platform_name preserves the collaborator repository owner"
+    assert_contains "$(cat "$home_directory/.ssh/config" 2>/dev/null || true)" "Host github-testuser" "$platform_name uses the personal SSH alias for collaboration"
 }
 
 test_forced_manual_setup() {
@@ -412,7 +412,7 @@ for platform_name in macos linux; do
     test_restores_github_account_after_key_creation "$script_path" "$platform_name"
     test_declined_personal_setup_is_non_mutating "$script_path" "$platform_name"
     test_restores_github_account_when_setup_fails "$script_path" "$platform_name"
-    test_invalid_owner_is_non_mutating "$script_path" "$platform_name"
+    test_collaborator_repository_setup "$script_path" "$platform_name"
     test_forced_manual_setup "$script_path" "$platform_name"
     test_yes_replaces_origin "$script_path" "$platform_name"
     test_incomplete_key_pair_is_rejected "$script_path" "$platform_name"

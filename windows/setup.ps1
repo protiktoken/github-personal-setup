@@ -183,8 +183,8 @@ if ($PathParts.Count -ne 2) {
 $Owner = $PathParts[0]
 $RepositoryName = $PathParts[1]
 
-if (-not $Owner.Equals($GitHubUsername, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Stop-WithError "Repository owner '$Owner' does not match GitHub username '$GitHubUsername'."
+if ($Owner -notmatch '^[A-Za-z0-9_.-]+$' -or $Owner -eq '.' -or $Owner -eq '..') {
+    Stop-WithError 'The URL contains an invalid repository owner.'
 }
 
 if ($RepositoryName -notmatch '^[A-Za-z0-9._-]+$' -or $RepositoryName -eq '.' -or $RepositoryName -eq '..') {
@@ -193,7 +193,7 @@ if ($RepositoryName -notmatch '^[A-Za-z0-9._-]+$' -or $RepositoryName -eq '.' -o
 
 $UsernameLower = $GitHubUsername.ToLowerInvariant()
 $HostAlias = "github-$UsernameLower"
-$PersonalRemote = "git@${HostAlias}:${GitHubUsername}/${RepositoryName}.git"
+$PersonalRemote = "git@${HostAlias}:${Owner}/${RepositoryName}.git"
 $UserHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 $SshDirectory = Join-Path $UserHome '.ssh'
 $KeyPath = Join-Path $SshDirectory "id_ed25519_github_$UsernameLower"
@@ -211,6 +211,7 @@ if ($ExistingRemote -cne $PersonalRemote -and -not $Yes) {
     Write-Host ''
     Write-Host "Repository:      $RepositoryRoot"
     Write-Host "GitHub account:  $GitHubUsername"
+    Write-Host "Repository owner: $Owner"
     Write-Host "Commit identity: $CommitName <$CommitEmail>"
     Write-Host "New origin:      $PersonalRemote"
     Write-Host ''

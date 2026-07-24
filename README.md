@@ -177,13 +177,19 @@ git@github.com:username/repository.git
 ssh://git@github.com/username/repository.git
 ```
 
-The URL owner must match the supplied username. The saved remote is normalized to an account-specific SSH alias:
+The supplied username selects the personal SSH identity. The URL owner selects the repository path, so it can be your username, an organization, or another user who has granted you collaborator access. The saved remote is normalized to an account-specific SSH alias while preserving the URL owner:
 
 ```text
-git@github-username:username/repository.git
+git@github-personal-username:repository-owner/repository.git
 ```
 
-The `<username>` portion is generated from the personal GitHub username entered by each user; it is not a fixed project account. Only repositories whose remote uses that generated alias use the personal key. Repositories that keep their normal `github.com` remote continue using the machine's existing default GitHub configuration.
+For example, personal user `octocat` collaborating on `hubot/example` gets:
+
+```text
+git@github-octocat:hubot/example.git
+```
+
+The alias username is generated from the personal GitHub username entered by each user; it is not a fixed project account. Only repositories whose remote uses that generated alias use the personal key. Repositories that keep their normal `github.com` remote continue using the machine's existing default GitHub configuration. GitHub enforces whether that personal account has permission to access the repository.
 
 This allows personal and work GitHub accounts to coexist without changing the machine's default Git identity or active GitHub CLI account. GitHub Copilot authentication is separate and is never inspected or changed by these scripts.
 
@@ -294,7 +300,7 @@ If login was cancelled, rerunning is safe. Existing complete account-specific ke
 
 ### Repository Not Found
 
-Confirm that the GitHub repository already exists under the supplied username and that the repository URL is correct.
+Confirm that the GitHub repository already exists at the supplied URL and that the personal account owns it, belongs to its organization, or has been added as a collaborator.
 
 ### SSH Authentication Fails
 

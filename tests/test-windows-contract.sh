@@ -88,6 +88,8 @@ fi
 
 windows_safety_patterns=(
     "Configure this repository to use the personal GitHub account"
+    '$PersonalRemote = "git@${HostAlias}:${Owner}/${RepositoryName}.git"'
+    'Write-Host "Repository owner: $Owner"'
     'finally {'
     'gh auth switch --hostname github.com --user $OriginalGitHubCliUser'
 )
